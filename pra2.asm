@@ -116,8 +116,11 @@ numero           db   05 dup (30)
 ;; numéricos
 num_price   dw    0000
 num_units   dw    0000
-            
 
+;;; temps
+cod_prod_temp    db    05 dup (0)
+puntero_temp     dw    0000          
+ceros          db     2b  dup (0)
 ;;mensaje de escritura de archivo
 msj_escribiendo db "ESCRIBIENDO EN EL ARCHIVO... ", "$"
 error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
@@ -894,7 +897,10 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 
     ;;ELIMINAR PRODUCTO
     eliminar_producto proc
-		;;nueva linea
+        mov AX, @data
+        mov DS, AX
+        
+    	;;nueva linea
         mov DX, offset nl
 		mov AH, 09
 		int 21
@@ -906,7 +912,101 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
         mov DX, offset nl
 		mov AH, 09
 		int 21
-		jmp fin
+        eliminar_producto_archivo:
+                mov DX, 0000
+                mov [puntero_temp], DX
+        pedir_de_nuevo_codigo2:
+                mov DX, offset prompt_cod
+                mov AH, 09
+                int 21
+                mov DX, offset buffer_entrada
+                mov AH, 0a
+                int 21
+                ;;
+                mov DI, offset buffer_entrada
+                inc DI
+                mov AL, [DI]
+                cmp AL, 00
+                je  pedir_de_nuevo_codigo2 ;;validar si viene vacia la entrada
+                cmp AL, 05 ;;si viene una entrada, valida el tamaño
+                jb  aceptar_tam_cod2  ;; jb --> jump if below x < 4
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                jmp pedir_de_nuevo_codigo2;;si el tamaño es mayor a 4 bytes pide de nuevo el codigo
+                ;;; mover al campo codigo en la estructura producto
+        aceptar_tam_cod2:
+                mov SI, offset cod_prod_temp
+                mov DI, offset buffer_entrada
+                inc DI ;;se mueve al tamaño de la cadena de entrada
+                mov CH, 00
+                mov CL, [DI]
+                inc DI  ;; me posiciono en el contenido del buffer
+        copiar_codigo2:	mov AL, [DI]
+                mov [SI], AL
+                inc SI
+                inc DI
+                loop copiar_codigo2  ;; restarle 1 a CX, verificar que CX no sea 0, si no es 0 va a la etiqueta, 
+                ;;; la cadena ingresada en la estructura
+                ;;;
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                ;;
+                mov AL, 02              ;;;<<<<<  lectura/escritura
+                mov DX, offset archivo_prods
+                mov AH, 3d
+                int 21
+                mov [handle_prods], AX
+                ;;; TODO: revisar si existe
+        ciclo_encontrar:
+                mov BX, [handle_prods]
+                mov CX, 26
+                mov DX, offset cod_prod
+                moV AH, 3f
+                int 21
+                mov BX, [handle_prods]
+                mov CX, 4
+                mov DX, offset num_price
+                moV AH, 3f
+                int 21
+                cmp AX, 0000   ;; se acaba cuando el archivo se termina
+                je finalizar_borrar
+                ;;SE LLENA CON CEROS EL TEMPORAL
+                mov DX, [puntero_temp]
+                add DX, 2a
+                mov [puntero_temp], DX
+                ;;; verificar si es producto válido
+                mov AL, 00
+                cmp [cod_prod], AL
+                je ciclo_encontrar
+                ;;; verificar el código
+                mov SI, offset cod_prod_temp
+                mov DI, offset cod_prod
+                mov CX, 0005
+                call cadenas_iguales
+                ;;;; <<
+                cmp DL, 0ff
+                je borrar_encontrado
+                jmp ciclo_encontrar
+        borrar_encontrado:
+                mov DX, [puntero_temp]
+                sub DX, 2a
+                mov CX, 0000
+                mov BX, [handle_prods]
+                mov AL, 00
+                mov AH, 42
+                int 21
+                ;;; puntero posicionado ESCRIBIR LOS 0 EN EL ESPACIO EN BLANCO
+                mov CX, 2a
+                mov DX, offset ceros
+                mov AH, 40
+                int 21
+        finalizar_borrar:
+                mov BX, [handle_prods]
+                mov AH, 3e
+                int 21
+                jmp menu_productos
     eliminar_producto endp
 
     ver_productos proc
@@ -1177,6 +1277,29 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 ret
     numAcadena endp
 
+    ;; cadenas_iguales -
+;; ENTRADA:
+;;    SI -> dirección a cadena 1
+;;    DI -> dirección a cadena 2
+;;    CX -> tamaño máximo
+;; SALIDA:
+;;    DL -> 00 si no son iguales
+
+;;         0ff si si lo son
+    cadenas_iguales proc
+        ciclo_cadenas_iguales:
+                mov AL, [SI]
+                cmp [DI], AL
+                jne no_son_iguales
+                inc DI
+                inc SI
+                loop ciclo_cadenas_iguales
+                ;;;;; <<<
+                mov DL, 0ff
+                ret
+        no_son_iguales:	mov DL, 00
+                ret
+    cadenas_iguales endp
         ;; memset
     ;; ENTRADA:
     ;;    DI -> dirección de la cadena
