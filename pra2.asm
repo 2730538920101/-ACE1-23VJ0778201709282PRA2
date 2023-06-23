@@ -1,3 +1,37 @@
+    ConvertirNumeroCadena MACRO val1, val2 
+        LOCAL L_DIV, L_ALM, L_CERO, L_FIN
+        ;;inicializar registros
+        mov AX, val1 
+        lea SI, val2 
+        mov DX, 0000
+        mov CX, 0000
+        mov BX, 000a ;base 10
+
+        ;verificar val1
+        cmp AX, 0000
+        je L_CERO
+
+        L_DIV: 
+            cmp AX, 00
+            je L_ALM
+            div BX 
+            push DX 
+            inc CX 
+            xor DX, DX
+            jmp L_DIV
+        L_ALM:
+            pop DX
+            add DX, 30 ;;SUMAMOS 30 PARA CONVERTIR EL NUMERO
+            mov [SI], DL 
+            inc SI
+            loop L_ALM
+            jmp L_FIN
+        L_CERO:
+            mov DL, 30
+            mov [SI], DL
+        L_FIN:
+
+   ENDM 
 .model small
 .radix 16
 .stack
@@ -118,6 +152,12 @@ handle_reps      dw   0000
 
 ;;buffer del numero para la conversion
 numero           db   05 dup (30)
+dia     db  ?
+mes     db  ?
+anio    dw  ?
+cadenaFecha db 11 dup('$') ; Variable para almacenar la fecha en formato de cadena
+
+
 ;; numéricos
 num_price   dw    0000
 num_units   dw    0000
@@ -140,17 +180,41 @@ td_html                db     "<td>"
 tdc_html               db     "</td>"
 tr_html                db     "<tr>"
 trc_html               db     "</tr>"
+p_html                 db     "<p>"
+pc_html                db     "</p>"
+tam_abrir_p            db     3
+tam_cierre_p           db     4
 
+;;ESTRUCTURA PARA LA FECHA DE LOS REPORTES
+rep_tit db "REPORTE GENERADO LA FECHA:  ";;28 bytes
+rep_day db 2 dup(0);; 2
+rep_sep1 db "/" ;;1
+rep_mmont db 2 dup(0);;2
+rep_sep2 db "/";;1
+rep_year db 2 dup(0);;2
+rep_sep3 db " HORA:  ";;8
+rep_hora db 2 dup(0);;2
+rep_sep4 db ":";;1
+rep_minu db 2 dup(0);;2
 
+rep_aux_fecha dw 0000
 
 
 ;;mensaje de escritura de archivo
 msj_escribiendo db "ESCRIBIENDO EN EL ARCHIVO... ", "$"
 error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
-.code 
+.code
+
+
+
     main proc
         mov AX, @data
         mov DS, AX
+        
+        ;;INICIA EL CODIGO DEL PROGRAMA
+        mov DX, offset nl
+		mov AH, 09
+		int 21
 
         ;;INICIA EL CODIGO DEL PROGRAMA
         mov DX, offset nl
@@ -1117,7 +1181,11 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 
     ;;REPORTE CATALOGO
     reporte_catalogo proc
-		
+        ;;eliminar el archivo
+        mov DX, offset nombre_rep1
+        mov AH, 41
+        int 21 
+		;;crear el archivo
 		mov AH, 3c
 		mov CX, 0000
 		mov DX, offset nombre_rep1
@@ -1160,7 +1228,7 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 ;; ¿cuántos bytes leímos?
                 ;; si se leyeron 0 bytes entonces se terminó el archivo...
                 cmp AX, 00
-                je menu_herramientas
+                je fin_mostrar_rep1
                 ;; ver si es producto válido
                 mov AL, 00
                 cmp [cod_prod], AL
@@ -1175,6 +1243,73 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov CH, 00
                 mov CL, [tam_cierre_tabla]
                 mov DX, offset cierre_tabla
+                int 21
+                ;; AQUI ESCRIBIR LA FECHA EN UNA ETIQUETA P
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_abrir_p]
+                mov DX, offset p_html
+                int 21
+               
+                ;;OBTENER LA FECHA COMPLETA
+                mov AH, 2a
+                int 21
+
+                ;;almacenar el dia
+                mov AX, 0000
+                mov AL, DL
+                mov rep_aux_fecha, AX
+                push CX
+                push DX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_day
+                pop DX 
+
+                ;almacenar el mes
+                mov AX, 0000
+                mov AL, DH
+                mov rep_aux_fecha, AX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_mmont
+                pop CX
+
+               ;almacenar el año
+                sub CX, 7d0 ;; restar 2000 para obtener los ultimos 2 digitos
+                mov AX, 0000
+                mov AL, CL
+                mov rep_aux_fecha, AX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_year
+
+                ;se obtiene la hora
+                mov AH, 2c 
+                int 21
+                ; las horas
+                mov AX, 0000
+                mov AL, CH 
+                mov rep_aux_fecha, AX 
+                push CX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_hora
+                pop CX 
+
+                ;los minutos   
+                mov AX, 0000
+                mov AL, CL 
+                mov rep_aux_fecha, AX
+                ConvertirNumeroCadena rep_aux_fecha, rep_minu
+
+                ;;imprimir 31 bytes en hex
+                mov BX, [handle_reps]
+                mov CX, 31
+                mov CH, 00
+                mov AH, 40
+                mov DX, offset rep_tit
+                int 21
+
+
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_cierre_p]
+                mov DX, offset pc_html
                 int 21
                 ;;
                 mov BX, [handle_reps]
@@ -1494,5 +1629,7 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
         mov ah, 4c 
         int 21
     fin endp
+
+
 
 end main
