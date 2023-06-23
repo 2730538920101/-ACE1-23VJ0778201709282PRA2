@@ -111,6 +111,11 @@ units_prod   db    05 dup (0) ;;tamaño 2 bytes
 archivo_prods    db   "vacas/pra2/PROD.BIN",00
 handle_prods     dw   0000
 
+;;archivo catalg.htm MANEJADOR Y NOMBRE
+;;
+nombre_rep1      db   "vacas/pra2/CATALG.HTM",00
+handle_reps      dw   0000
+
 ;;buffer del numero para la conversion
 numero           db   05 dup (30)
 ;; numéricos
@@ -121,6 +126,24 @@ num_units   dw    0000
 cod_prod_temp    db    05 dup (0)
 puntero_temp     dw    0000          
 ceros          db     2b  dup (0)
+
+;;DATOS PARA EL REPORTE HTM
+tam_encabezado_html    db     0c
+encabezado_html        db     "<html><body>"
+tam_inicializacion_tabla   db   3e
+inicializacion_tabla   db     '<table border="1"><tr><td>codigo</td><td>descripcion</td></tr>'
+tam_cierre_tabla       db     8
+cierre_tabla           db     "</table>"
+tam_footer_html        db     0e
+footer_html            db     "</body></html>"
+td_html                db     "<td>"
+tdc_html               db     "</td>"
+tr_html                db     "<tr>"
+trc_html               db     "</tr>"
+
+
+
+
 ;;mensaje de escritura de archivo
 msj_escribiendo db "ESCRIBIENDO EN EL ARCHIVO... ", "$"
 error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
@@ -1094,19 +1117,88 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 
     ;;REPORTE CATALOGO
     reporte_catalogo proc
-		;;nueva linea
-        mov DX, offset nl
-		mov AH, 09
+		
+		mov AH, 3c
+		mov CX, 0000
+		mov DX, offset nombre_rep1
 		int 21
-		;;imprimir titulo
-        mov DX, offset reporte1
-        mov AH, 09
-        int 21
-		;;nueva linea
-        mov DX, offset nl
-		mov AH, 09
+		mov [handle_reps], AX
+		mov BX, AX
+		mov AH, 40
+		mov CH, 00
+		mov CL, [tam_encabezado_html]
+		mov DX, offset encabezado_html
 		int 21
-		jmp fin
+		mov BX, [handle_reps]
+		mov AH, 40
+		mov CH, 00
+		mov CL, [tam_inicializacion_tabla]
+		mov DX, offset inicializacion_tabla
+		int 21
+		;;
+		mov AL, 02
+		mov AH, 3d
+		mov DX, offset archivo_prods
+		int 21
+		;;
+		mov [handle_prods], AX
+		;; leemos
+        ciclo_mostrar_rep1:
+                ;; puntero cierta posición
+                mov BX, [handle_prods]
+                mov CX, 26     ;; leer 26h bytes
+                mov DX, offset cod_prod
+                ;;
+                mov AH, 3f
+                int 21
+                ;; puntero avanzó
+                mov BX, [handle_prods]
+                mov CX, 0004
+                mov DX, offset num_price
+                mov AH, 3f
+                int 21
+                ;; ¿cuántos bytes leímos?
+                ;; si se leyeron 0 bytes entonces se terminó el archivo...
+                cmp AX, 00
+                je menu_herramientas
+                ;; ver si es producto válido
+                mov AL, 00
+                cmp [cod_prod], AL
+                je ciclo_mostrar_rep1
+                ;; producto en estructura
+                call imprimir_estructura_html
+                jmp ciclo_mostrar_rep1
+                ;;
+        fin_mostrar_rep1:
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_cierre_tabla]
+                mov DX, offset cierre_tabla
+                int 21
+                ;;
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_footer_html]
+                mov DX, offset footer_html
+                int 21
+                ;;
+                mov AH, 3e
+                int 21
+                ;;nueva linea
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                ;;imprimir titulo
+                mov DX, offset reporte1
+                mov AH, 09
+                int 21
+                ;;nueva linea
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                jmp menu_herramientas
     reporte_catalogo endp
 
     ;;REPORTE PRODUCTOS
@@ -1194,6 +1286,90 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 		int 21
         ret
     imprimir_estructura endp
+
+    ;;; ENTRADA:
+;;    BX -> handle
+    imprimir_estructura_html proc
+		mov BX, [handle_reps]
+		mov AH, 40
+		mov CH, 00
+		mov CL, 04
+		mov DX, offset tr_html
+		int 21
+		;;
+		mov BX, [handle_reps]
+		mov AH, 40
+		mov CH, 00
+		mov CL, 04
+		mov DX, offset td_html
+		int 21
+		;;
+		mov DX, offset cod_prod
+		mov SI, 0000
+        ciclo_escribir_codigo:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je escribir_desc
+                cmp SI, 0006
+                je escribir_desc
+                mov CX, 0001
+                mov BX, [handle_reps]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_codigo
+        escribir_desc:
+                ;;
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 05
+                mov DX, offset tdc_html
+                int 21
+                ;;
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 04
+                mov DX, offset td_html
+                int 21
+                ;;
+                mov DX, offset des_prod
+                mov SI, 0000
+        ciclo_escribir_desc:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je cerrar_tags
+                cmp SI, 0026
+                je cerrar_tags
+                mov CX, 0001
+                mov BX, [handle_reps]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_desc
+                ;;
+        cerrar_tags:
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 05
+                mov DX, offset tdc_html
+                int 21
+                ;;
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 05
+                mov DX, offset trc_html
+                int 21
+                ;;
+                ret
+        imprimir_estructura_html endp 
 
     ;; esperar_enter - espera que se presione enter para continuar              [SUBRUTINA]
     ;; Entrada - ninguna
