@@ -36,6 +36,18 @@
 .radix 16
 .stack
 .data
+;;inicio de sesion
+clave_capturada        db     09  dup (0)
+usuario_capturado      db     08  dup (0)
+                       db '$'
+espacio_leido          db     00
+estado                 db     00
+buffer_linea           db     0ff dup (0)
+tam_liena_leida        db     00
+handle_conf            dw     0000
+nombre_conf            db     "vacas/pra2/PRA2.CNF", 00
+
+
 usac    db   "Universidad de San Carlos de Guatemala","$"
 curso   db   "Arquitectura de Computadoras y Ensambladores 1","$"
 seccion db   "Seccion N","$"
@@ -110,12 +122,16 @@ error_crear_archivo_prod db "ERROR, EL ARCHIVO NO HA SIDO CREADO", "$"
 error_lectura_archivo_prod db "ERROR, NO SE PUDO ABRIR EL ARCHIVO DE PRODUCTOS", "$"
 
 ;;ESTRUCTURA DATOS CREDENCIALES
-usu db 'usuario = "cpolanco"', '$'
-cla db 'clave = "201709282"', '$'
+usu db "cpolanco" ;;8 bytes
+cla db "201709282";; 9bytes
 
-encabezado_cred db 0f dup(0), "$" ;;15 bytes contando caracteres especiales
-usuario_cred db 15 dup(0), "$" ;;21 bytes contando caracteres especiales
-clave_cred db 14 dup(0), "$";;20 bytes contando caracteres especiales
+;;Estructura para leer credenciales
+        ;;tamaño en hex, valor
+encabezado_cred db 0e, "[credenciales]" ;;14 bytes contando caracteres especiales
+usuario_cred db 07, "usuario" ;;7 bytes contando caracteres especiales
+clave_cred db 05, "clave";;5 bytes contando caracteres especiales
+igual_cred db 01, "="
+comillas_cred db 01, '"'
 
 success_login db "CREDENCIALES CORRECTAS", "$"
 
@@ -204,13 +220,28 @@ rep_aux_fecha dw 0000
 msj_escribiendo db "ESCRIBIENDO EN EL ARCHIVO... ", "$"
 error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 .code
-
-
+    
 
     main proc
         mov AX, @data
         mov DS, AX
         
+        ; ;;Llamar sub rutina de acceso
+        ; call validar_acceso
+        ; mov DX, offset usuario_capturado
+        ; mov AH, 09
+        ; int 21
+
+        ; ;;INICIA EL CODIGO DEL PROGRAMA
+        ; mov DX, offset nl
+		; mov AH, 09
+		; int 21
+
+        ; mov DX, offset clave_capturada
+        ; mov AH, 09
+        ; int 21
+        ; call esperar_enter
+
         ;;INICIA EL CODIGO DEL PROGRAMA
         mov DX, offset nl
 		mov AH, 09
@@ -1623,6 +1654,178 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
             loop ciclo_memset
             ret
     memset endp
+
+
+    validar_acceso proc
+                ;; abrir archivo de configuración
+                mov AH, 3d
+                mov AL, 00
+                mov DX, offset nombre_conf
+                int 21
+                mov [handle_conf], AX
+                ;; analizarlo
+        ciclo_lineaXlinea:
+                mov DI, offset buffer_linea
+                mov AL, 00
+                mov [tam_liena_leida], AL
+        ciclo_obtener_linea:
+                mov AH, 3f
+                mov BX, [handle_conf]
+                mov CX, 0001
+                mov DX, DI
+                int 21
+                cmp CX, 0000
+                je fin_leer_linea
+                mov AL, [DI]
+                cmp AL, 0a
+                je fin_leer_linea
+                mov AL, [tam_liena_leida]
+                inc AL
+                mov [tam_liena_leida], AL
+                inc DI
+                jmp ciclo_obtener_linea
+        fin_leer_linea:
+                mov AL, [tam_liena_leida]
+                mov AL, 00
+                cmp [estado], AL   ;; verificar la cadena credenciales
+                je verificar_cadena_credenciales
+                mov AL, 01
+                cmp [estado], AL   ;; obtener campo
+                je obtener_campo_conf
+                mov AL, 02
+                cmp [estado], AL   ;; obtener campo
+                je obtener_campo_conf
+                jmp retorno_exitoso
+        verificar_cadena_credenciales:
+                cmp CX, 0000
+                je retorno_fallido
+                mov CH, 00
+                mov CL, [encabezado_cred]
+                mov SI, offset encabezado_cred
+                inc SI
+                mov DI, offset buffer_linea
+                call cadenas_iguales
+                cmp DL, 0ff
+                je si_hay_creds
+                jmp retorno_fallido
+        si_hay_creds:
+                mov AL, [estado]
+                inc AL
+                mov [estado], AL
+                jmp ciclo_lineaXlinea
+                ;;
+        obtener_campo_conf:
+                cmp CX, 0000
+                je retorno_fallido
+                mov CH, 00
+                mov CL, [usuario_cred]
+                mov SI, offset usuario_cred
+                inc SI
+                mov DI, offset buffer_linea
+                call cadenas_iguales
+                cmp DL, 0ff
+                je obtener_valor_usuario
+                ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+                mov CH, 00
+                mov CL, [clave_cred]
+                mov SI, offset clave_cred
+                inc SI
+                mov DI, offset buffer_linea
+                call cadenas_iguales
+                cmp DL, 0ff
+                je obtener_valor_clave
+                jmp retorno_fallido
+        obtener_valor_usuario:
+        ciclo_espacios1:
+                inc DI
+                mov AL, [DI]
+                cmp AL, 20    ;; ver si es espacio
+                jne ver_si_es_igual
+                inc DI
+                jmp ciclo_espacios1
+        ver_si_es_igual:
+                mov CH, 00
+                mov CL, [igual_cred]
+                mov SI, offset igual_cred
+                inc SI
+                call cadenas_iguales
+                cmp DL, 0ff
+                je obtener_valor_cadena_usuario
+                jmp retorno_fallido
+        obtener_valor_cadena_usuario:
+        ciclo_espacios2:
+                inc DI
+                mov AL, [DI]
+                cmp AL, 20    ;; ver si es espacio
+                jne capturar_usuario
+                inc DI
+                jmp ciclo_espacios2
+        capturar_usuario:
+                mov CX, 0008    ;; TAMAÑO DEL USUARIO: 8 caracteres
+                mov SI, offset usuario_capturado
+        ciclo_cap_usuario:
+                inc DI
+                inc SI
+                mov AL, [DI]
+                mov [SI], AL
+                loop ciclo_cap_usuario
+                mov AL, [estado]
+                inc AL
+                mov [estado], AL
+                jmp ciclo_lineaXlinea
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;,
+        obtener_valor_clave:
+        ciclo_espacios3:
+                inc DI
+                mov AL, [DI]
+                cmp AL, 20    ;; ver si es espacio
+                jne ver_si_es_igual2
+                inc DI
+                jmp ciclo_espacios3
+        ver_si_es_igual2:
+                mov CH, 00
+                mov CL, [igual_cred]
+                mov SI, offset igual_cred
+                inc SI
+                call cadenas_iguales
+                cmp DL, 0ff
+                je obtener_valor_cadena_clave
+                jmp retorno_fallido
+        obtener_valor_cadena_clave:
+        ciclo_espacios4:
+                inc DI
+                mov AL, [DI]
+                cmp AL, 20    ;; ver si es espacio
+                jne capturar_clave
+                inc DI
+                jmp ciclo_espacios4
+        capturar_clave:
+                mov CX, 0009    ;; TAMAÑO DE LA CLAVE: 9 caracteres
+                mov SI, offset clave_capturada
+        ciclo_cap_clave:
+                inc DI
+                inc SI
+                mov AL, [DI]
+                mov [SI], AL
+                loop ciclo_cap_clave
+                mov AL, [estado]
+                inc AL
+                mov [estado], AL
+                jmp ciclo_lineaXlinea
+                ;; ver si el nombre de campo es "usuario"
+                ;;      trabajo con la línea
+                ;; comparar nombre
+                ;; comparar clave
+                ;; si son correctos devolver en DL = 0ff
+                ;; si no son correctos devolver en DL = 00
+        retorno_fallido:
+                mov DL, 00
+                ret
+        retorno_exitoso:
+                mov DL, 0ff
+                ret
+    validar_acceso endp
+
 
     fin proc
         ;;interrupcion de finalizacion del programa
