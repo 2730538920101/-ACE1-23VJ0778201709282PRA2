@@ -36,10 +36,9 @@
 .radix 16
 .stack
 .data
-;;inicio de sesion
+;;inicio de sesion         tam bytes  contenido
 clave_capturada        db     09  dup (0)
 usuario_capturado      db     08  dup (0)
-                       db '$'
 espacio_leido          db     00
 estado                 db     00
 buffer_linea           db     0ff dup (0)
@@ -177,6 +176,8 @@ cadenaFecha db 11 dup('$') ; Variable para almacenar la fecha en formato de cade
 ;; numéricos
 num_price   dw    0000
 num_units   dw    0000
+num_aux     dw    0000
+num_aux2     dw    0000
 
 ;;; temps
 cod_prod_temp    db    05 dup (0)
@@ -186,8 +187,8 @@ ceros          db     2b  dup (0)
 ;;DATOS PARA EL REPORTE HTM
 tam_encabezado_html    db     0c
 encabezado_html        db     "<html><body>"
-tam_inicializacion_tabla   db   3e
-inicializacion_tabla   db     '<table border="1"><tr><td>codigo</td><td>descripcion</td></tr>'
+tam_inicializacion_tabla   db   5e
+inicializacion_tabla   db     '<table border="1"><tr><td>codigo</td><td>descripcion</td><td>precio</td><td>unidades</td></tr>'
 tam_cierre_tabla       db     8
 cierre_tabla           db     "</table>"
 tam_footer_html        db     0e
@@ -227,26 +228,74 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
         mov DS, AX
         
         ; ;;Llamar sub rutina de acceso
-        ; call validar_acceso
-        ; mov DX, offset usuario_capturado
-        ; mov AH, 09
-        ; int 21
+        call validar_acceso
 
-        ; ;;INICIA EL CODIGO DEL PROGRAMA
-        ; mov DX, offset nl
-		; mov AH, 09
-		; int 21
+        ;;VALIDAR USUARIO
+        mov DX, offset validate_user
+        mov AH, 09
+        int 21
+        mov DX, offset nl
+		mov AH, 09
+		int 21
+        mov SI, offset usuario_capturado
+        inc SI ;;pasar al contenido del buffer
+        mov DI, offset usu 
+        mov CX, 08
+        call cadenas_iguales
+        cmp DL, 00
+        je print_error_usuario
 
-        ; mov DX, offset clave_capturada
-        ; mov AH, 09
-        ; int 21
-        ; call esperar_enter
 
-        ;;INICIA EL CODIGO DEL PROGRAMA
+        ;;VALIDAR CLAVE
+        mov DX, offset validate_key
+        mov AH, 09
+        int 21
         mov DX, offset nl
 		mov AH, 09
 		int 21
 
+        mov SI, offset clave_capturada
+        inc SI
+        mov DI, offset cla
+        mov CX, 09
+        call cadenas_iguales
+        cmp DL, 00
+        je print_error_clave
+        jmp login_exitoso
+        print_error_usuario:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;USUARIO
+            mov DX, offset error_usu
+            mov AH, 09
+            int 21
+            jmp fin
+        print_error_clave:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;USUARIO
+            mov DX, offset error_clave
+            mov AH, 09
+            int 21
+            jmp fin
+        login_exitoso:
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            mov DX, offset success_login
+            mov AH, 09
+            int 21
+            call esperar_enter
+            jmp menu_principal  
+    main endp
+
+            
+
+    menu_principal proc
         ;;INICIA EL CODIGO DEL PROGRAMA
         mov DX, offset nl
 		mov AH, 09
@@ -297,20 +346,6 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
         mov DX, offset nl
 		mov AH, 09
 		int 21
-		;;nueva linea
-        mov DX, offset nl
-		mov AH, 09
-		int 21
-		;;nueva linea
-        mov DX, offset nl
-		mov AH, 09
-		int 21
-        jmp menu_principal
-    main endp
-
-            
-
-    menu_principal proc
         ;;nueva linea
         mov DX, offset nl
 		mov AH, 09
@@ -1252,8 +1287,14 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 int 21
                 ;; puntero avanzó
                 mov BX, [handle_prods]
-                mov CX, 0004
+                mov CX, 0002
                 mov DX, offset num_price
+                mov AH, 3f
+                int 21
+
+                 mov BX, [handle_prods]
+                mov CX, 0002
+                mov DX, offset num_units
                 mov AH, 3f
                 int 21
                 ;; ¿cuántos bytes leímos?
@@ -1477,7 +1518,7 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov AL, [DI]
                 cmp AL, 00
                 je escribir_desc
-                cmp SI, 0006
+                cmp SI, 0004
                 je escribir_desc
                 mov CX, 0001
                 mov BX, [handle_reps]
@@ -1508,9 +1549,9 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov DI, DX
                 mov AL, [DI]
                 cmp AL, 00
-                je cerrar_tags
-                cmp SI, 0026
-                je cerrar_tags
+                je escribir_precio
+                cmp SI, 0021
+                je escribir_precio
                 mov CX, 0001
                 mov BX, [handle_reps]
                 mov AH, 40
@@ -1519,6 +1560,59 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 inc SI
                 jmp ciclo_escribir_desc
                 ;;
+        escribir_precio:
+                ;;
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 04
+                mov DX, offset td_html
+                int 21
+                ;;
+                
+                ConvertirNumeroCadena num_price, num_aux 
+                mov DX, offset num_aux
+                mov SI, 0000
+        ciclo_escribir_precio:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je escribir_units
+                cmp SI, 0002
+                je escribir_units
+                mov CX, 0001
+                mov BX, [handle_reps]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_precio
+        escribir_units:
+                ;;
+                mov BX, [handle_reps]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 04
+                mov DX, offset td_html
+                int 21
+                ;;
+                ConvertirNumeroCadena num_units, num_aux2
+                mov DX, offset num_aux2
+                mov SI, 0000
+        ciclo_escribir_units:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je cerrar_tags
+                cmp SI, 0002
+                je cerrar_tags
+                mov CX, 0001
+                mov BX, [handle_reps]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_units
         cerrar_tags:
                 mov BX, [handle_reps]
                 mov AH, 40
@@ -1560,6 +1654,11 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 		ret
     esperar_enter endp
 
+    ;; cadenaAnum
+;; ENTRADA:
+;;    DI -> dirección a una cadena numérica
+;; SALIDA:
+;;    AX -> número convertido
     ;;SUBRUTINA PARA PASAR CADENA A NUMERO
     cadenaAnum proc
             mov AX, 0000    ; inicializar la salida
@@ -1662,6 +1761,7 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov AL, 00
                 mov DX, offset nombre_conf
                 int 21
+                jc error_archivo_cred
                 mov [handle_conf], AX
                 ;; analizarlo
         ciclo_lineaXlinea:
@@ -1824,6 +1924,17 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
         retorno_exitoso:
                 mov DL, 0ff
                 ret
+                ;;IMPRIMIR ERROR DE ARCHIVO DE CREDENCIALES
+        error_archivo_cred:
+                ;;nueva linea
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                ;;imprimir titulo
+                mov DX, offset error_archivo_credenciales
+                mov AH, 09
+                int 21
+                jmp fin 
     validar_acceso endp
 
 
