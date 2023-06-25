@@ -165,6 +165,10 @@ handle_prods     dw   0000
 nombre_rep1      db   "vacas/pra2/CATALG.HTM",00
 handle_reps      dw   0000
 
+;;archivo FALTA.HTML reporte de sin existencia
+nombre_rep2     db  "vacas/pra2/FALTA.HTM",00
+handle_reps2    dw    0000
+
 ;;buffer del numero para la conversion
 numero           db   05 dup (30)
 dia     db  ?
@@ -1444,19 +1448,175 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
 
     ;;REPORTE PRODUCTO SIN EXISTENCIA
     reporte_productos_null proc
-		;;nueva linea
-        mov DX, offset nl
-		mov AH, 09
+        ;;eliminar el archivo
+        mov DX, offset nombre_rep2
+        mov AH, 41
+        int 21 
+		;;crear el archivo
+		mov AH, 3c
+		mov CX, 0000
+		mov DX, offset nombre_rep2
 		int 21
-		;;imprimir titulo
-        mov DX, offset reporte4
-        mov AH, 09
-        int 21
-		;;nueva linea
-        mov DX, offset nl
-		mov AH, 09
+		mov [handle_reps2], AX
+		mov BX, AX
+		mov AH, 40
+		mov CH, 00
+		mov CL, [tam_encabezado_html]
+		mov DX, offset encabezado_html
 		int 21
-		jmp fin
+		mov BX, [handle_reps2]
+		mov AH, 40
+		mov CH, 00
+		mov CL, [tam_inicializacion_tabla]
+		mov DX, offset inicializacion_tabla
+		int 21
+		;;
+		mov AL, 02
+		mov AH, 3d
+		mov DX, offset archivo_prods
+		int 21
+		;;
+		mov [handle_prods], AX
+		;; leemos
+        ciclo_mostrar_rep2:
+                ;; puntero cierta posición
+                mov BX, [handle_prods]
+                mov CX, 26     ;; leer 26h bytes
+                mov DX, offset cod_prod
+                ;;
+                mov AH, 3f
+                int 21
+                ;; puntero avanzó
+                mov BX, [handle_prods]
+                mov CX, 0002
+                mov DX, offset num_price
+                mov AH, 3f
+                int 21
+
+                 mov BX, [handle_prods]
+                mov CX, 0002
+                mov DX, offset num_units
+                mov AH, 3f
+                int 21
+
+                
+                ;; ¿cuántos bytes leímos?
+                ;; si se leyeron 0 bytes entonces se terminó el archivo...
+                cmp AX, 00
+                je fin_mostrar_rep2
+                ;; ver si es producto válido
+                mov AL, 00
+                cmp [cod_prod], AL
+                je ciclo_mostrar_rep2
+
+                ;;COMPARAR LAS UNIDADES A CERO
+                mov AX, num_units
+                int 03
+                cmp num_units, 00
+                jne ciclo_mostrar_rep2
+                
+                ;; producto en estructura
+                call imprimir_estructura_html2
+                jmp ciclo_mostrar_rep2
+                
+                ;;
+        fin_mostrar_rep2:
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_cierre_tabla]
+                mov DX, offset cierre_tabla
+                int 21
+                ;; AQUI ESCRIBIR LA FECHA EN UNA ETIQUETA P
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_abrir_p]
+                mov DX, offset p_html
+                int 21
+               
+                ;;OBTENER LA FECHA COMPLETA
+                mov AH, 2a
+                int 21
+
+                ;;almacenar el dia
+                mov AX, 0000
+                mov AL, DL
+                mov rep_aux_fecha, AX
+                push CX
+                push DX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_day
+                pop DX 
+
+                ;almacenar el mes
+                mov AX, 0000
+                mov AL, DH
+                mov rep_aux_fecha, AX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_mmont
+                pop CX
+
+               ;almacenar el año
+                sub CX, 7d0 ;; restar 2000 para obtener los ultimos 2 digitos
+                mov AX, 0000
+                mov AL, CL
+                mov rep_aux_fecha, AX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_year
+
+                ;se obtiene la hora
+                mov AH, 2c 
+                int 21
+                ; las horas
+                mov AX, 0000
+                mov AL, CH 
+                mov rep_aux_fecha, AX 
+                push CX 
+                ConvertirNumeroCadena rep_aux_fecha, rep_hora
+                pop CX 
+
+                ;los minutos   
+                mov AX, 0000
+                mov AL, CL 
+                mov rep_aux_fecha, AX
+                ConvertirNumeroCadena rep_aux_fecha, rep_minu
+
+                ;;imprimir 31 bytes en hex
+                mov BX, [handle_reps2]
+                mov CX, 31
+                mov CH, 00
+                mov AH, 40
+                mov DX, offset rep_tit
+                int 21
+
+
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_cierre_p]
+                mov DX, offset pc_html
+                int 21
+                ;;
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, [tam_footer_html]
+                mov DX, offset footer_html
+                int 21
+                ;;
+                mov AH, 3e
+                int 21
+                ;;nueva linea
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                ;;imprimir titulo
+                mov DX, offset reporte4
+                mov AH, 09
+                int 21
+                ;;nueva linea
+                mov DX, offset nl
+                mov AH, 09
+                int 21
+                jmp menu_herramientas
     reporte_productos_null endp
 
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1569,7 +1729,9 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov DX, offset td_html
                 int 21
                 ;;
-                
+                mov DI, offset num_aux
+                mov CX, 0002
+                call memset
                 ConvertirNumeroCadena num_price, num_aux 
                 mov DX, offset num_aux
                 mov SI, 0000
@@ -1596,6 +1758,9 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov DX, offset td_html
                 int 21
                 ;;
+                mov DI, offset num_aux2
+                mov CX, 0002
+                call memset
                 ConvertirNumeroCadena num_units, num_aux2
                 mov DX, offset num_aux2
                 mov SI, 0000
@@ -1629,7 +1794,150 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 int 21
                 ;;
                 ret
-        imprimir_estructura_html endp 
+    imprimir_estructura_html endp
+
+    ;;; ENTRADA:
+;;    BX -> handle
+    imprimir_estructura_html2 proc
+		mov BX, [handle_reps2]
+		mov AH, 40
+		mov CH, 00
+		mov CL, 04
+		mov DX, offset tr_html
+		int 21
+		;;
+		mov BX, [handle_reps2]
+		mov AH, 40
+		mov CH, 00
+		mov CL, 04
+		mov DX, offset td_html
+		int 21
+		;;
+		mov DX, offset cod_prod
+		mov SI, 0000
+        ciclo_escribir_codigo2:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je escribir_desc2
+                cmp SI, 0004
+                je escribir_desc2
+                mov CX, 0001
+                mov BX, [handle_reps2]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_codigo2
+        escribir_desc2:
+                ;;
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 05
+                mov DX, offset tdc_html
+                int 21
+                ;;
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 04
+                mov DX, offset td_html
+                int 21
+                ;;
+                mov DX, offset des_prod
+                mov SI, 0000
+        ciclo_escribir_desc2:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je escribir_precio2
+                cmp SI, 0021
+                je escribir_precio2
+                mov CX, 0001
+                mov BX, [handle_reps2]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_desc2
+                ;;
+        escribir_precio2:
+                ;;
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 04
+                mov DX, offset td_html
+                int 21
+                ;;
+                mov DI, offset num_aux
+                mov CX, 0002
+                call memset
+                ConvertirNumeroCadena num_price, num_aux 
+                mov DX, offset num_aux
+                mov SI, 0000
+        ciclo_escribir_precio2:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je escribir_units2
+                cmp SI, 0002
+                je escribir_units2
+                mov CX, 0001
+                mov BX, [handle_reps2]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_precio2
+        escribir_units2:
+                ;;
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 04
+                mov DX, offset td_html
+                int 21
+                ;;
+                mov DI, offset num_aux2
+                mov CX, 0002
+                call memset
+                ConvertirNumeroCadena num_units, num_aux2
+                mov DX, offset num_aux2
+                mov SI, 0000
+        ciclo_escribir_units2:
+                mov DI, DX
+                mov AL, [DI]
+                cmp AL, 00
+                je cerrar_tags2
+                cmp SI, 0002
+                je cerrar_tags2
+                mov CX, 0001
+                mov BX, [handle_reps2]
+                mov AH, 40
+                int 21
+                inc DX
+                inc SI
+                jmp ciclo_escribir_units2
+        cerrar_tags2:
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 05
+                mov DX, offset tdc_html
+                int 21
+                ;;
+                mov BX, [handle_reps2]
+                mov AH, 40
+                mov CH, 00
+                mov CL, 05
+                mov DX, offset trc_html
+                int 21
+                ;;
+                ret
+    imprimir_estructura_html2 endp
+
 
     ;; esperar_enter - espera que se presione enter para continuar              [SUBRUTINA]
     ;; Entrada - ninguna
