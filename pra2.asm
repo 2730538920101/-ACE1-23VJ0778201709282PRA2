@@ -160,6 +160,10 @@ units_prod   db    05 dup (0) ;;tamaño 2 bytes
 archivo_prods    db   "vacas/pra2/PROD.BIN",00
 handle_prods     dw   0000
 
+;;archivo ventas MANEJADOR Y NOMBRE
+archivo_ventas    db   "vacas/pra2/VENT.BIN",00
+handle_ventas     dw   0000
+
 ;;archivo catalg.htm MANEJADOR Y NOMBRE
 ;;
 nombre_rep1      db   "vacas/pra2/CATALG.HTM",00
@@ -171,17 +175,20 @@ handle_reps2    dw    0000
 
 ;;buffer del numero para la conversion
 numero           db   05 dup (30)
-dia     db  ?
-mes     db  ?
-anio    dw  ?
+dia     db  02 dup (0)
+mes     db  02 dup (0)
+anio    dw  0000
+hora    db  02 dup (0)
+minuto  db  02 dup (0)
 cadenaFecha db 11 dup('$') ; Variable para almacenar la fecha en formato de cadena
 
 
 ;; numéricos
-num_price   dw    0000
-num_units   dw    0000
-num_aux     dw    0000
-num_aux2     dw    0000
+num_price      dw    0000
+num_units      dw    0000
+num_units_aux  dw    0000
+num_aux        dw    0000
+num_aux2       dw    0000
 
 ;;; temps
 cod_prod_temp    db    05 dup (0)
@@ -220,10 +227,31 @@ rep_minu db 2 dup(0);;2
 
 rep_aux_fecha dw 0000
 
+;;ESTRUCTURA PARA LA FECHA DE LAS VENTAS
 
 ;;mensaje de escritura de archivo
 msj_escribiendo db "ESCRIBIENDO EN EL ARCHIVO... ", "$"
 error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
+
+promt_units_ventas db "INGRESA LAS UNIDADES QUE DESEAS: ", "$"
+
+;;SECCION DE VENTAS
+new_units_aux dw 0000
+new_units dw 0000
+contador_items dw 0000 
+monto_total dw 0000
+monto_venta dw 0000
+monto_venta_aux dw 0000
+msj_cancelar_ventar db "DESEA FINALIZAR LA VENTA? (s/n) " , "$" 
+msj_monto_total db "EL MONTO ACUMULADO DE LA VENTA ACTUAL ES: ", "$"
+
+success_venta db "VENTA REALIZADA EXITOSAMENTE", "$"
+error_producto_no_ex db "ERROR, EL PRODUCTO INGRESADO NO EXISTE", "$"
+error_no_hay_prod db "ERROR, NO HAY SUFICIENTES UNIDADES DISPONIBLES DE PRODUCTO PARA SATISFACER LA VENTA", "$"
+error_seguir_ingreso db "ERROR, DEBES INGRESAR (s/n), NO IMPORTA SI ES MAYUSCULA O MINUSCULA", "$"
+
+fin_valid db "FIN"
+
 .code
     
 
@@ -1099,7 +1127,21 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov CH, 00
                 mov CL, [DI]
                 inc DI  ;; me posiciono en el contenido del buffer
-        copiar_codigo2:	mov AL, [DI]
+        copiar_cod2:
+            ;;VALIDAR QUE VENGAN LOS CARACTERES CORRECTOS
+                mov AL, [DI] ;;guardo el contenido del buffer
+                cmp AL, 30 ;; COMPARA CON EL NUMERO <0>
+                jb error_ingresar_cod2
+                cmp AL, 39 ;; COMPARA CON EL NUMERO <9>
+                Ja validar_letra_cod2
+                jmp copiar_codigo2
+        validar_letra_cod2:
+            cmp AL, 41 ;;COMPARA CON LA LETRA <A>
+            jb error_ingresar_cod2 
+            cmp AL, 5a ;;COMPARA CON LA LETRA <Z>
+            ja error_ingresar_cod2
+                
+        copiar_codigo2:	
                 mov [SI], AL
                 inc SI
                 inc DI
@@ -1164,6 +1206,20 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov AH, 3e
                 int 21
                 jmp menu_productos
+        ;;ERROR AL INGRESAR EL CODIGO
+        error_ingresar_cod2:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset error_prompt_cod
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            jmp pedir_de_nuevo_codigo2
     eliminar_producto endp
 
     ver_productos proc
@@ -1246,7 +1302,492 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
         mov DX, offset nl
 		mov AH, 09
 		int 21
-		jmp fin
+        prueba_open_file:
+            ;;ABRIR ARCHIVO
+            mov AL, 02
+            mov AH, 3d
+            mov DX, offset archivo_ventas
+            int 21
+            jc crear_archivo_ventas
+            jmp guardar_handle_ventas
+        ;;CREAR ARCHIVO SI NO EXISTE SUBRUTINA
+        crear_archivo_ventas:
+            ;;CREAR ARCHIVO
+            mov CX, 0000
+            mov DX, offset archivo_ventas
+            mov AH, 3c
+            int 21
+            jc fin 
+            jmp guardar_handle_ventas
+        guardar_handle_ventas:
+            mov [handle_ventas], AX
+        ;;escribir fecha en el archivo en hex
+            ;;OBTENER LA FECHA COMPLETA
+            mov AH, 2a
+            int 21
+            ;;DL = dia, DH = mes, CX = año
+            mov [dia], DL
+            mov [mes], DH
+            mov [anio], CX
+
+            ;;OBTENER LA HORA COMPLETA
+            mov AH, 2c
+            int 21
+            ;; CH = horas, CL = minutos
+            mov [hora], CH
+            mov [minuto], CL
+
+            ;;UBICAR EL PUNTERO AL FINAL DEL ARCHIVO
+            mov BX, [handle_ventas]
+            mov CX, 00
+            mov DX, 00
+            mov AL, 02
+            mov AH, 42
+            int 21
+
+            ;;INGRESAR FECHA Y HORA EN EL ARCHIVO
+            mov BX, [handle_ventas]
+            mov CX, 02 
+            mov DX, offset dia 
+            mov AH, 40 
+            int 21
+
+            mov BX, [handle_ventas]
+            mov CX, 02 
+            mov DX, offset mes
+            mov AH, 40 
+            int 21 
+        
+            mov BX, [handle_ventas]
+            mov CX, 04 
+            mov DX, offset anio 
+            mov AH, 40 
+            int 21
+
+            mov BX, [handle_ventas]
+            mov CX, 02 
+            mov DX, offset hora
+            mov AH, 40 
+            int 21
+
+            mov BX, [handle_ventas]
+            mov CX, 02 
+            mov DX, offset minuto 
+            mov AH, 40 
+            int 21
+
+            mov BX, [handle_ventas]
+            mov AH, 3e
+            int 21
+       
+        pedir_item:
+            mov AL, 02
+            mov AH, 3d
+            mov DX, offset archivo_ventas
+            int 21
+            mov [handle_ventas], AX 
+            mov BX, [handle_ventas]
+            mov CX, 00
+            mov DX, 00
+            mov AL, 02
+            mov AH, 42
+            int 21
+            ;;REINICIAR EL PUNTERO TEMPORAL
+            mov DX, 0000
+            mov [puntero_temp], DX
+            ;;reiniciar contador del monto
+            mov monto_venta, 0000
+        ;;CODIGO
+        ingreso_cod_productos3:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset prompt_cod
+            mov AH, 09
+            int 21
+            ;;INGRESAR CODIGO
+            mov DX, offset buffer_entrada
+            mov AH, 0a
+            int 21
+            ;;VALIDAR TAMAÑO
+            mov DI, offset buffer_entrada
+            ;;sumamos 1 al buffer para obtener el tamaño de la entrada
+            inc DI
+            ;;guardamos el valor
+            mov AL, [DI]
+            ;;verificar si la entrada viene vacia
+            cmp AL, 00
+            je error_ingresar_cod3 
+            ;;verificar el tamaño este en el rango designado
+            cmp AL, 05
+            jb validar_entrada_cod3
+            ;;SI ES MAYOR SALTA AL ERROR Y SOLICITA DE NUEVO EL CODIGO 
+            mov DX, offset nl 
+            mov AH, 09
+            int 21
+            jmp error_ingresar_cod3
+        ;;VALIDAR LOS CARACTERES DE LA ENTRADA
+        validar_entrada_cod3:
+            mov SI, offset cod_prod_temp
+            mov DI, offset buffer_entrada
+            inc DI ;; me posiciono en el tamaño de la cadena
+            mov CH, 00
+            mov CL, [DI]
+            inc DI  ;; me posiciono en el contenido del buffer
+        copiar_cod3:
+            ;;VALIDAR QUE VENGAN LOS CARACTERES CORRECTOS
+            mov AL, [DI] ;;guardo el contenido del buffer
+            cmp AL, 30 ;; COMPARA CON EL NUMERO <0>
+            jb error_ingresar_cod3
+            cmp AL, 39 ;; COMPARA CON EL NUMERO <9>
+            Ja validar_letra_cod3
+            jmp codigo_copiado3
+        validar_letra_cod3:
+            cmp AL, 41 ;;COMPARA CON LA LETRA <A>
+            jb error_ingresar_cod3 
+            cmp AL, 5a ;;COMPARA CON LA LETRA <Z>
+            ja error_ingresar_cod3
+            jmp codigo_copiado3
+        codigo_copiado3:
+            mov [SI], AL
+            inc SI
+            inc DI
+            loop copiar_cod3 ;; restarle 1 a CX, verificar que CX no sea 0, si no es 0 va a la etiqueta, 
+            ;;; la cadena ingresada en la estructura
+            ;;;
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;Validar si se ingresa la palabra FIN
+            mov DI, offset cod_prod_temp
+            mov SI, offset fin_valid
+            mov CX, 03
+            call cadenas_iguales
+            cmp DL, 0ff
+            je fin_pedir_item
+            jmp ver_producto_existe 
+        ;;ERROR AL INGRESAR EL CODIGO
+        error_ingresar_cod3:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset error_prompt_cod
+            mov AH, 09
+            int 21
+             ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            jmp pedir_item
+        ver_producto_existe:
+            mov AL, 02              ;;;<<<<<  lectura/escritura
+            mov DX, offset archivo_prods
+            mov AH, 3d
+            int 21
+            mov [handle_prods], AX
+                ;;; TODO: revisar si existe
+            ciclo_encontrar2:
+                mov BX, [handle_prods]
+                mov CX, 26
+                mov DX, offset cod_prod
+                moV AH, 3f
+                int 21
+                mov BX, [handle_prods]
+                mov CX, 2
+                mov DX, offset num_price
+                moV AH, 3f
+                int 21
+                mov BX, [handle_prods]
+                mov CX, 2
+                mov DX, offset num_units_aux
+                moV AH, 3f
+                int 21
+                cmp AX, 0000   ;; se acaba cuando el archivo se termina
+                je finalizar_verificacion3
+                ;;GUARDAR EL PUNTERO EN LA UBICACION DEL PRODUCTO
+                mov DX, [puntero_temp]
+                add DX, 2a ;;AJUSTAR EL PUNTERO CON LA CANTIDAD DE BYTES DE LA ESTRUCTURA
+                mov [puntero_temp], DX                
+                ;;; verificar si es producto válido
+                mov AL, 00
+                cmp [cod_prod], AL
+                je ciclo_encontrar2
+                ;;; verificar el código
+                mov SI, offset cod_prod_temp
+                mov DI, offset cod_prod
+                mov CX, 0005
+                call cadenas_iguales
+                ;;;; <<
+                cmp DL, 0ff
+                je ingreso_units_venta ;;AHORA VALIDAR UNIDADES ingreso_units_venta
+                jmp ciclo_encontrar2  
+            ;;UNIDADES DISPONIBLES
+        ingreso_units_venta:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset promt_units_ventas
+            mov AH, 09
+            int 21
+            ;;INGRESAR units
+            mov DX, offset buffer_entrada
+            mov AH, 0a
+            int 21
+            ;;VALIDAR TAMAÑO
+            mov DI, offset buffer_entrada
+            ;;sumamos 1 al buffer para obtener el tamaño de la entrada
+            inc DI
+            ;;guardamos el valor
+            mov AL, [DI]
+            ;;verificar si la entrada viene vacia
+            cmp AL, 00
+            je error_ingresar_units2 
+            ;;verificar el tamaño este en el rango designado
+            cmp AL, 03
+            jb validar_entrada_units2
+            ;;SI ES MAYOR SALTA AL ERROR Y SOLICITA DE NUEVO LAS UNIDADES 
+            mov DX, offset nl 
+            mov AH, 09
+            int 21
+            jmp error_ingresar_units2
+        ;;VALIDAR LOS CARACTERES DE LA ENTRADA
+        validar_entrada_units2:
+            mov SI, offset units_prod
+            mov DI, offset buffer_entrada
+            inc DI ;; me posiciono en el tamaño de la cadena
+            mov CH, 00
+            mov CL, [DI]
+            inc DI  ;; me posiciono en el contenido del buffer
+        copiar_units2:
+            ;;VALIDAR QUE VENGAN LOS CARACTERES CORRECTOS
+            mov AL, [DI] ;;guardo el contenido del buffer
+            cmp AL, 30 ;; COMPARA CON EL NUMERO <0>
+            jb error_ingresar_units2
+            cmp AL, 39 ;; COMPARA CON EL NUMERO <9>
+            Ja error_ingresar_units2
+            mov [SI], AL
+            inc SI
+            inc DI
+            loop copiar_units2 ;; restarle 1 a CX, verificar que CX no sea 0, si no es 0 va a la etiqueta, 
+            ;;; la cadena ingresada en la estructura
+            ;;;TRATAMIENTO ESPECIAL PARA NUMEROS, PASAR A CADENA
+            ;;
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;
+            mov DI, offset units_prod
+            call cadenaAnum
+            ;; AX -> numero convertido
+            mov [num_units], AX
+            ;;
+            mov DI, offset units_prod
+            mov CX, 0005
+            call memset
+            jmp validar_existencia_units2
+            ;;ERROR AL INGRESAR LAS UNIDADES DISPONIBLES
+        error_ingresar_units2:
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset error_prompt_unidades
+            mov AH, 09
+            int 21
+            ;;nueva linea
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            jmp pedir_item
+        validar_existencia_units2:
+            ;;verificar si hay unidades disponibles en el archivo
+            cmp num_units, 00
+            je error_unidades_disp
+            ;;verificar si las unidades disponibles >= unidades ingresadas
+            mov AX, num_units_aux
+            mov BX, num_units
+            cmp AX, BX
+            jge si_hay_producto
+            ;;si no es mayor o igual salta al error
+            jmp error_unidades_disp
+        
+        si_hay_producto:
+            ;;restar AX y BX
+            sub AX, BX
+            
+            mov new_units, AX
+            
+            ;;POSICIONAR PUNTERO AL INICIO DE LA ESTRUCTURA
+            mov DX, [puntero_temp]
+            sub DX, 2a
+            mov CX, 0000
+            mov BX, [handle_prods]
+            mov AL, 00
+            mov AH, 42
+            int 21 
+
+            ;;REESCRIBIR LA ESTRUCTURA CON EL NUEVO VALOR DE CANTIDAD
+            mov CX, 26
+            mov DX, offset cod_prod
+            mov AH, 40
+            int 21
+            ;;PRECIO
+            mov CX, 02
+            mov DX, offset num_price
+            mov AH, 40
+            int 21
+            ;;CANTIDAD ACTUALIZADA
+            mov CX, 02
+            mov DX, offset new_units
+            mov AH, 40
+            int 21
+            ;; cerrar archivo
+            mov AH, 3e
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset success_venta
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;
+            
+            jmp escribir_venta
+        escribir_venta:
+            ;;Escribir el producto
+            ;;ESCRIBIR CODIGO
+            mov BX, [handle_ventas]
+            mov CX, 04
+            mov DX, offset cod_prod
+            mov AH, 40
+            int 21
+            ;;ESCRIBIR UNIDADES
+            mov BX, [handle_ventas]
+            mov CX, 02
+            mov DX, offset num_units
+            mov AH, 40 
+            int 21
+
+            ;; cerrar archivo
+            mov AH, 3e
+            int 21
+            
+            ;;calcular monto
+            mov AX, num_price
+            mul num_units
+            mov monto_venta, AX
+            mov BX, monto_total
+            add BX, monto_venta
+            mov monto_total, BX
+            mov DI, offset monto_venta_aux
+            mov CX, 0004
+            call memset
+            ConvertirNumeroCadena monto_total, monto_venta_aux
+            mov DX, offset msj_monto_total
+            mov AH, 09
+            int 21
+            mov BX, 01
+            mov CX, 0004
+            mov DX, offset monto_venta_aux
+            mov AH, 40
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;INCREMENTAMOS EL VALOR DEL CONTADOR
+            inc contador_items
+            cmp contador_items, 000a
+            jne pedir_item
+            ;;Salida, se reinicia el contador
+            mov contador_items, 0000
+            mov monto_total, 0000
+            jmp menu_venta
+
+
+        
+        error_unidades_disp:
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset error_no_hay_prod
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            jmp pedir_item
+        
+        
+        
+        fin_pedir_item:
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset msj_cancelar_ventar
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            mov AH, 01
+            int 21
+            cmp AL, 53
+            je salir_venta 
+            cmp AL, 73 
+            je salir_venta
+            cmp AL, 6e 
+            je pedir_item 
+            cmp AL, 4e
+            je pedir_item
+            jmp error_entrada_seguir 
+        
+        error_entrada_seguir:
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            ;;imprimir titulo
+            mov DX, offset error_seguir_ingreso
+            mov AH, 09
+            int 21
+            mov DX, offset nl
+            mov AH, 09
+            int 21
+            jmp fin_pedir_item
+        
+        finalizar_verificacion3:
+                mov BX, [handle_prods]
+                mov AH, 3e
+                int 21
+                jmp pedir_item
+
+        salir_venta:
+             ;; cerrar archivo
+                mov BX, [handle_ventas]
+                mov AH, 3e
+                int 21
+                mov contador_items, 0000
+                mov monto_total, 0000
+                jmp menu_venta
+        
     realizar_venta endp
 
     ;;REPORTE CATALOGO
@@ -1296,7 +1837,7 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 mov AH, 3f
                 int 21
 
-                 mov BX, [handle_prods]
+                mov BX, [handle_prods]
                 mov CX, 0002
                 mov DX, offset num_units
                 mov AH, 3f
@@ -1514,7 +2055,7 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
                 int 03
                 cmp num_units, 00
                 jne ciclo_mostrar_rep2
-                
+
                 ;; producto en estructura
                 call imprimir_estructura_html2
                 jmp ciclo_mostrar_rep2
@@ -2054,12 +2595,12 @@ error_write_file_prod db "ERROR AL ESCRIBIR LOS PRODUCTOS EN EL ARCHIVO...", "$"
     ;;    DI -> dirección de la cadena
     ;;    CX -> tamaño de la cadena
     memset proc
-    ciclo_memset:
-            mov AL, 00
-            mov [DI], AL
-            inc DI
-            loop ciclo_memset
-            ret
+        ciclo_memset:
+                mov AL, 00
+                mov [DI], AL
+                inc DI
+                loop ciclo_memset
+                ret
     memset endp
 
 
